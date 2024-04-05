@@ -1,0 +1,214 @@
+---
+title: "IE360 HW1"
+author: "Mehmet Barış Cankır"
+date: "2024-04-05"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The aim of this project is to analyze and draw conclusions from the following data sets that are taken from the Central Bank of the Republic of Turkey and create time series regression models for each one of them. The chosen data sets are as follows:
+
+1- "Tedavüldeki Banknotların Kupür Dağılımı (Tutar TL)(Aylık) / Tedavüldeki Banknotlar Toplam (Tutar TL)"
+
+2- "Temel işgücü göstergeleri (Bin Kişi - 15+ yaş)(Aylık) / İşsizlik Oranı (%)"
+
+3-
+
+The search is to see if there is if we can find any correlation between the above data sets and other data sets seperately.
+
+For the total value of the banknotes in circulation of Turkish Lira, we will look for consumer price index, USD/TL exchange rate, and Google Trends data of search for the word "enflasyon" (inflation in Turkish). All data is in between the years 2018 and 2024, and provided monthly.
+
+For the unemployment rate, we will look for Google Trends search data of the word "iş ilanı" (job posting) and it's square, . All data is in between the years 2020 and 2024, and provided monthly.
+
+# Banknotes in Circulation
+
+## Data Manipulation and Visualization
+
+We import the needed libraries and the data we will perform the analysis on.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+require(GGally)
+library(lmtest)
+library(readxl)
+library(ggplot2)
+library(stats)
+library(tseries)
+library(forecast)
+library(xts)
+require(openxlsx)
+require(data.table)
+require(skimr)
+require(GGally)
+require(ggcorrplot)
+library(dplyr)
+
+banknotes <- read_excel("/Users/baris/Desktop/Banknotes.xlsx")
+inflation <- read_excel("/Users/baris/Desktop/Inflation.xlsx")
+tufe <- read_excel("/Users/baris/Desktop/TÜFE.xlsx")
+usd_tl <-read_excel("/Users/baris/Desktop/USD-TL.xlsx")
+```
+
+Since the data imported has a different data type for Date, we change the data type to date.
+
+```{r}
+banknotes$Date <- as.Date(banknotes$Date)
+inflation$Date <- as.Date(inflation$Date)
+usd_tl$Date <- as.Date(usd_tl$Date)
+tufe$Date <- as.Date(tufe$Date)
+```
+
+We combine all in a single merged data set synced by date.
+
+```{r}
+combined_banknotes <- merge(banknotes, inflation, by="Date")
+combined_banknotes <- merge(combined_banknotes, tufe, by="Date")
+combined_banknotes <- merge(combined_banknotes, usd_tl, by="Date")
+```
+
+We should observe the plots of each additional data with the amount of circulating banknotes.
+
+```{r}
+ggplot(data=combined_banknotes, aes(x=Date, y=Banknotes)) + geom_point() + labs(title= "Banknotes-Date") + geom_smooth(method="lm", se=FALSE)
+ggplot(data=combined_banknotes, aes(x=Inflation, y=Banknotes)) + geom_point() + labs(title= "Banknotes-Inflation Search") + geom_smooth(method="lm", se=FALSE)
+ggplot(data=combined_banknotes, aes(x=TÜFE, y=Banknotes)) + geom_point() + labs(title= "Banknotes-CPI") + geom_smooth(method="lm", se=FALSE)
+ggplot(data=combined_banknotes, aes(x=USD_TL_Rate, y=Banknotes)) + geom_point() + labs(title= "Banknotes-USD/TL Rate") + geom_smooth(method="lm", se=FALSE)
+```
+
+We can see that it is highly likely to create a good model for banknotes with the others. We can also check for a total paired correlation table with ggpairs.
+
+```{r}
+ggpairs(data.frame(combined_banknotes))
+```
+
+## Time Series Regression
+
+We should create a time series data and add seasonality dummy variable to our data set.
+
+```{r}
+ts_data <- ts(combined_banknotes$Banknotes, frequency = 12)
+seasonality <- seasonaldummy(ts_data)
+combined_banknotes <- cbind(combined_banknotes, seasonality)
+```
+
+We should create a model where we give the decided data as the predictors.
+
+```{r}
+banknotes_model <- lm(Banknotes ~ Date + Inflation + seasonality + TÜFE + USD_TL_Rate, combined_banknotes)
+```
+
+We can check out the relevant plots to see if it seems to be a good model.
+
+```{r}
+plot(banknotes_model)
+```
+
+Given plots seems to be good enough. We can check for the summary.
+
+```{r}
+summary(banknotes_model)
+```
+
+R\^2, adjusted R\^2, F-stat and p-value seems satisfying. We can continue with BG test to see if there is something wrong with the model.
+
+```{r}
+bgtest(banknotes_model)
+```
+
+Test statistics and p-value seems fine. As a last check, we can look for how linear the fitted and actual values.
+
+```{r}
+banknotes_data=data.table(Actual = combined_banknotes$Banknotes, Fitted=fitted(banknotes_model))
+ggplot(banknotes_data,aes(x=Actual, y=Fitted)) + geom_point() + ylab("Fitted (predicted values)") + xlab("Data (actual values)") + geom_abline(intercept=0, slope=1)
+```
+
+## Conclusion
+
+Given all the above tables and analysis, we can conclude that the given predictors make a good model for the banknotes in circulation. Especially when we look for the linearity of the fitted and actual data, it seems that the given predictors are strong indicators of amount of banknotes in circulation. The least correlated predictor is trend data, which we took from Google Trends. The most correlated data seems to be USD/TL exchange rate which makes sense since it carries the inflation data and wealth in it.
+
+# Unemployment
+
+## Data Manipulation and Visualization
+
+We import the data mentioned above and create a merged data set by their matching date to easily perform analysis on.
+
+```{r}
+unemployment <- read_excel("/Users/baris/desktop/Unemployment.xlsx")
+jobsearch <- read_excel("/Users/baris/desktop/JobSearch.xlsx")
+working_population <- read_excel("/Users/baris/desktop/Working Population.xlsx")
+combined_unemployment <- merge(unemployment, jobsearch, by="Date")
+combined_unemployment <- merge(combined_unemployment, working_population, by="Date")
+```
+
+Since the data imported has a different data type for Date, we change the data type to date.
+
+```{r}
+combined_unemployment$Date <- as.Date(combined_unemployment$Date)
+```
+
+Let's check the plots to see if we can detect a good correlation between the chosen data sets.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+ggplot(combined_unemployment, aes(x=Date, y=Unemp_Rate)) + geom_point() + geom_smooth(method="lm", se=FALSE) + labs(title="Chronological Unemployment Rate") + theme(axis.text.x = element_text(angle = 90))
+ggplot(combined_unemployment, aes(x=Date, y=Search)) + geom_point() + geom_smooth(method="lm") + labs(title="Search for 'İş İlanları' on Google") + theme(axis.text.x = element_text(angle = 90))
+ggplot(combined_unemployment, aes(x=Date, y=Search)) + geom_point() + geom_point(aes(y=Unemp_Rate)) + geom_smooth(aes(y=Search), se=FALSE ,method = "lm") +geom_smooth(aes(y=Unemp_Rate),method = "lm") + labs(title="Search for 'İş İlanları' on Google")
+```
+
+We can see that it is highly likely to create a good model for uneployment with the others. We can also check for a total paired correlation table with ggpairs.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+ggpairs(combined_unemployment)
+```
+
+Here, we can clearly see that especially date (trend) and population over 15 years old data gives the highest correlation.
+
+## Time Series Regression
+
+We should create a time series data and add seasonality dummy variable to our data set.
+
+```{r}
+ts_data <- ts(combined_unemployment$Unemp_Rate, frequency = 12)
+seasonality <- seasonaldummy(ts_data)
+combined_unemployment <- cbind(combined_unemployment, seasonality)
+```
+
+We should create a model where we give the decided data as the predictors.
+
+```{r}
+unemployment_model <- lm(Unemp_Rate ~ Search + Date + seasonality + Population_Over_15, combined_unemployment)
+```
+
+We can check out the relevant plots to see if it seems to be a good model.
+
+```{r}
+plot(unemployment_model)
+```
+
+Given plots seems to be good enough. We can check for the summary.
+
+```{r}
+summary(unemployment_model)
+```
+
+R\^2, adjusted R\^2, F-stat and p-value seems satisfying. We can continue with BG test to see if there is something wrong with the model.
+
+```{r}
+bgtest(unemployment_model)
+```
+
+Test statistics and p-value seems good enough. As a last check, we can look for how linear the fitted and actual values.
+
+```{r}
+unemp_data=data.table(Actual = combined_unemployment$Unemp_Rate, Fitted=fitted(unemployment_model))
+ggplot(unemp_data,aes(x=Actual, y=Fitted)) + geom_point() + ylab("Fitted (predicted values)") + xlab("Data (actual values)") + geom_abline(intercept=0, slope=1)
+```
+
+## Conclusion
+
+Given all the above tables and analysis, we can conclude that the given predictors make a good model for the banknotes in circulation. Especially when we look for the linearity of the fitted and actual data, it seems that the given predictors are strong indicators of amount of unemployment rate. The least correlated predictor is trend data, which we took from Google Trends as the search volume of the word "iş ilanı". The most correlated data seems to be 15+ years old population makes sense since it shows the population growth of the sub-population we look for in.
